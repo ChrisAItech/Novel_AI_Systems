@@ -5,12 +5,34 @@ from torch_geometric.nn import GCNConv, GraphConv, GATConv
 from torch_geometric.data import Data, Batch
 
 class GraphWaveletConv(nn.Module):
+    """
+    Graph Wavelet Convolution layer.
+
+    This layer performs graph convolution using wavelet transforms. It applies multiple GCNConv layers with different scales (wavelets)
+    and concatenates the results.
+
+    Args:
+        in_channels (int): Number of input channels.
+        out_channels (int): Number of output channels.
+        scales (int): Number of wavelet scales to use.
+    """
     def __init__(self, in_channels, out_channels, scales):
         super(GraphWaveletConv, self).__init__()
         self.scales = scales
         self.conv = nn.ModuleList([GCNConv(in_channels, out_channels) for _ in range(scales)])
 
     def forward(self, x, edge_index, edge_weight):
+        """
+        Forward pass of the GraphWaveletConv layer.
+
+        Args:
+            x (Tensor): Node feature matrix.
+            edge_index (Tensor): Edge index matrix.
+            edge_weight (Tensor): Edge weight matrix.
+
+        Returns:
+            Tensor: Output feature matrix.
+        """
         # Normalize edge weights (example: min-max scaling)
         min_weight = edge_weight.min()
         max_weight = edge_weight.max()
@@ -23,6 +45,16 @@ class GraphWaveletConv(nn.Module):
         return torch.cat(wavelets, dim=1)
 
 class AdaptiveGraphPooling(nn.Module):
+    """
+    Adaptive Graph Pooling layer.
+
+    This layer performs adaptive graph pooling based on node attention scores. It learns attention scores for each node
+    and selects the top nodes based on these scores.
+
+    Args:
+        in_channels (int): Number of input channels.
+        ratio (float): Ratio of nodes to keep after pooling.
+    """
     def __init__(self, in_channels, ratio):
         super(AdaptiveGraphPooling, self).__init__()
         self.in_channels = in_channels
@@ -39,6 +71,18 @@ class AdaptiveGraphPooling(nn.Module):
                 nn.init.kaiming_uniform_(layer.weight, nonlinearity='relu')
 
     def forward(self, x, edge_index, edge_weight, batch):
+        """
+        Forward pass of the AdaptiveGraphPooling layer.
+
+        Args:
+            x (Tensor): Node feature matrix.
+            edge_index (Tensor): Edge index matrix.
+            edge_weight (Tensor): Edge weight matrix.
+            batch (Tensor): Batch vector.
+
+        Returns:
+            Tuple[Tensor, Tensor, Tensor, Tensor]: Output feature matrix, updated edge index, updated edge weight, and updated batch vector.
+        """
         scores = self.att(x)
         scores = scores.squeeze()
         scores = F.softmax(scores, dim=0)
@@ -67,6 +111,17 @@ class AdaptiveGraphPooling(nn.Module):
         return x, edge_index, edge_weight, batch, indices
 
     def filter_adj(self, edge_index, edge_weight, indices):
+        """
+        Filters the adjacency matrix based on the selected indices.
+
+        Args:
+            edge_index (Tensor): Edge index matrix.
+            edge_weight (Tensor): Edge weight matrix.
+            indices (Tensor): Indices of the selected nodes.
+
+        Returns:
+            Tensor: Filtered edge weight matrix.
+        """
         mask = torch.zeros(edge_index.size(1), dtype=torch.bool, device=edge_index.device)
         for idx in indices:
             mask |= (edge_index[0] == idx) | (edge_index[1] == idx)
@@ -75,6 +130,16 @@ class AdaptiveGraphPooling(nn.Module):
         return edge_weight
 
 class SpatioTemporalFusion(nn.Module):
+    """
+    Spatio-Temporal Fusion layer.
+
+    This layer fuses spatial and temporal features using attention mechanism. It learns attention scores for both spatial and temporal
+    features and combines them based on these scores.
+
+    Args:
+        in_channels (int): Number of input channels.
+        out_channels (int): Number of output channels.
+    """
     def __init__(self, in_channels, out_channels):
         super(SpatioTemporalFusion, self).__init__()
         self.spatial_att = nn.Sequential(
@@ -97,6 +162,18 @@ class SpatioTemporalFusion(nn.Module):
         self.conv = GATConv(in_channels * 2, out_channels)
 
     def forward(self, x_spatial, x_temporal, edge_index, edge_weight):
+        """
+        Forward pass of the SpatioTemporalFusion layer.
+
+        Args:
+            x_spatial (Tensor): Spatial feature matrix.
+            x_temporal (Tensor): Temporal feature matrix.
+            edge_index (Tensor): Edge index matrix.
+            edge_weight (Tensor): Edge weight matrix.
+
+        Returns:
+            Tensor: Fused feature matrix.
+        """
         spatial_scores = self.spatial_att(x_spatial)
         temporal_scores = self.temporal_att(x_temporal)
         scores = torch.softmax(torch.cat([spatial_scores, temporal_scores], dim=1), dim=1)
@@ -105,6 +182,19 @@ class SpatioTemporalFusion(nn.Module):
         return x_fused
 
 class AMST_GNN(nn.Module):
+    """
+    Adaptive Multi-Scale Spatio-Temporal Graph Neural Network (AMST-GNN).
+
+    This model combines graph wavelet convolution, adaptive graph pooling, and spatio-temporal fusion to learn representations
+    from both spatial and temporal graph data.
+
+    Args:
+        in_channels (int): Number of input channels.
+        hidden_channels (int): Number of hidden channels.
+        out_channels (int): Number of output channels.
+        scales (int): Number of wavelet scales to use.
+        pooling_ratios (List[float]): Ratios of nodes to keep after each pooling layer.
+    """
     def __init__(self, in_channels, hidden_channels, out_channels, scales, pooling_ratios):
         super(AMST_GNN, self).__init__()
         self.scales = scales
@@ -117,6 +207,21 @@ class AMST_GNN(nn.Module):
         self.conv3 = GraphConv(hidden_channels, out_channels)
 
     def forward(self, x_spatial, x_temporal, edge_index_spatial, edge_weight_spatial, edge_index_temporal, edge_weight_temporal, batch):
+        """
+        Forward pass of the AMST-GNN model.
+
+        Args:
+            x_spatial (Tensor): Spatial feature matrix.
+            x_temporal (Tensor): Temporal feature matrix.
+            edge_index_spatial (Tensor): Spatial edge index matrix.
+            edge_weight_spatial (Tensor): Spatial edge weight matrix.
+            edge_index_temporal (Tensor): Temporal edge index matrix.
+            edge_weight_temporal (Tensor): Temporal edge weight matrix.
+            batch (Tensor): Batch vector.
+
+        Returns:
+            Tensor: Output feature matrix.
+        """
         x_spatial = self.conv1(x_spatial, edge_index_spatial, edge_weight_spatial)
         x_temporal = self.conv1(x_temporal, edge_index_temporal, edge_weight_temporal)
         x_spatial, edge_index_spatial, edge_weight_spatial, batch_spatial, _ = self.pool1(x_spatial, edge_index_spatial, edge_weight_spatial, batch)
